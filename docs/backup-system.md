@@ -11,12 +11,13 @@ composer install
 ```
 
 ## 2. Variabel `.env` penting
-- Atur koneksi disk di `config/filesystems.php` dan `.env` (`BACKUP_DISK`, `FILESYSTEM_DRIVER`, dsb.).
+- Atur konfigurasi backup di `config/backup.php` dan `.env`.
 - Contoh variabel yang direkomendasikan:
 
 ```env
 BACKUP_DELETE_OLD_BACKUPS_AFTER_DAYS=7
 BACKUP_ARCHIVE_PASSWORD=             # optional
+BACKUP_NOTIFICATION_MAIL=you@example.com
 MAIL_FROM_ADDRESS=you@example.com    # untuk notifikasi
 MAIL_FROM_NAME=AppName
 ```
@@ -45,15 +46,15 @@ php artisan backup:clean
 * * * * * cd /path-to-your-project && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-- Di proyek ini, jadwal didefinisikan di `bootstrap/app.php` menggunakan `withSchedule(...)`.
-- Contoh jadwal yang aktif saat ini:
+- Di proyek ini, jadwal didefinisikan di `routes/console.php`:
 
-```
-$schedule->command('backup:run')->dailyAt('11:00');
-$schedule->exec('rclone copy storage/app/private/Laravel gdrive:backup-app')->dailyAt('11:00');
+```php
+Schedule::command('backup:run')->dailyAt('02:00');
+Schedule::command('backup:clean')->dailyAt('03:00');
 ```
 
-- Catatan: jangan mendefinisikan jadwal yang sama di dua tempat sekaligus (`bootstrap/app.php` dan `routes/console.php`) karena akan membuat job jalan ganda.
+- `backup:run` membuat backup otomatis setiap hari pukul 02:00. Setelah backup selesai, event `BackupWasSuccessful` akan memicu `SyncBackupToRemote` listener yang mengupload backup ke Google Drive via rclone.
+- `backup:clean` membersihkan backup lama sesuai strategi retensi setiap hari pukul 03:00.
 
 Untuk menjalankan scheduler lokal saat development gunakan:
 
@@ -65,8 +66,11 @@ php artisan schedule:work
 - Pastikan `rclone` dikonfigurasi dengan remote (mis. `gdrive`) dan uji manual:
 
 ```bash
-rclone copy storage/app/private/Laravel gdrive:backup-app
+rclone copy storage/app/backups/ gdrive:backup-app
 ```
+
+- Upload ke Google Drive dilakukan otomatis oleh `App\Listeners\SyncBackupToRemote` setiap kali `backup:run` berhasil.
+- Konfigurasi remote dan path ada di `.env`: `RCLONE_REMOTE` dan `RCLONE_REMOTE_PATH`.
 
 ## 7. Verifikasi
 - Periksa folder tujuan (`storage/app` atau disk remote) apakah file zip dan dump database terbentuk.
@@ -156,58 +160,30 @@ php artisan restore:backup 2026-04-16-01-38-19.zip --dry-run --restore-db=0 --di
 schtasks /Create /SC MINUTE /MO 1 /TN "LaravelSchedule" /TR "C:\\php\\php.exe -d memory_limit=-1 -f C:\\path\\to\\project\\artisan schedule:run" /F
 ```
 
-- Anda juga bisa membuat task yang menjalankan `rclone` setelah backup, atau panggil `backup:run` dan `rclone` melalui `schedule` di aplikasi (seperti contoh di `bootstrap/app.php`).
+- Anda juga bisa memanggil `backup:run` melalui `schedule` di `routes/console.php` seperti yang sudah dikonfigurasi.
 
-## 11. Copilot Prompt & Skill (Opsional)
+## 12. Arsitektur Backup (Spatie Laravel Backup)
 
-Project ini sudah punya customization agar operasional backup/restore lebih konsisten:
-
-- File instruction khusus backup/restore: `.github/instructions/backup.instructions.md`
-- Prompt siap pakai restore insiden: `.github/prompts/restore-playbook.prompt.md`
-- Skill workflow backup ops: `.github/skills/backup-ops/SKILL.md`
-
-Contoh penggunaan cepat di Copilot Chat:
-
-1. Jalankan prompt `/Restore Playbook` lalu isi nama file backup (contoh: `2026-04-16-01-38-19.zip`).
-2. Ikuti output berurutan: `Preflight` -> `Dry Run` -> `Full Restore`.
-3. Jika environment SQLite, gunakan varian `--restore-db=0` seperti yang disarankan prompt.
-
-Contoh prompt chat manual (tanpa slash command):
-
-```text
-Jalankan playbook restore untuk backup 2026-04-16-01-38-19.zip.
-Mulai dari dry-run, lalu berikan command full restore dengan rollback-on-fail.
-```
-
----
-
-Update: saya menambahkan contoh `.env.example` ke repository; lihat file root `.env.example`.
-
----
-
-## 12. Custom Backup Command: `app:run-backup`
-
-Command ini melakukan backup multi-database dan kompresi uploads secara manual maupun terjadwal
-setiap jam, **tanpa bergantung pada Spatie Backup**.
-
-### 12.1 Output yang dihasilkan
+Proyek ini menggunakan `spatie/laravel-backup` sebagai mekanisme backup utama. Alur lengkapnya:
 
 ```
-storage/app/backup/
-├── mpos_[timestamp].sql                      # dump database utama
-├── mpos_transaction_[timestamp].sql          # dump database transaksi
-└── uploads/
-    └── uploads_[timestamp].tar.gz            # kompresi folder storage/app/public/uploads
+cron (setiap menit) → schedule:run
+  → 02:00 backup:run
+      ├── dump mysql_main  (mpos)          → storage/app/backups/{APP_NAME}/
+      ├── dump mysql_transaction           → storage/app/backups/{APP_NAME}/
+      ├── compress storage/app/public/     → (masuk ke dalam zip)
+      └── zip semua → storage/app/backups/{APP_NAME}/{timestamp}.zip
+          └── event BackupWasSuccessful
+              └── SyncBackupToRemote listener
+                  └── rclone copy storage/app/backups/ gdrive:backup-app
+  → 03:00 backup:clean
+      └── hapus backup lama sesuai BACKUP_DELETE_OLD_BACKUPS_AFTER_DAYS
 ```
 
-`[timestamp]` menggunakan format `Y-m-d_H-i-s` dan konsisten untuk satu kali jalan.
-
-### 12.2 Konfigurasi `.env`
-
-Tambahkan blok berikut ke `.env` (contoh tersedia di `.env.example`):
+### 12.1 Konfigurasi `.env` yang dibutuhkan
 
 ```env
-# Database Utama
+# Database connections untuk backup
 BACKUP_MAIN_DB_CONNECTION=mysql
 BACKUP_MAIN_DB_HOST=127.0.0.1
 BACKUP_MAIN_DB_PORT=3306
@@ -215,7 +191,6 @@ BACKUP_MAIN_DB_DATABASE=mpos
 BACKUP_MAIN_DB_USERNAME=root
 BACKUP_MAIN_DB_PASSWORD=your_password
 
-# Database Transaksi
 BACKUP_TRANSACTION_DB_CONNECTION=mysql
 BACKUP_TRANSACTION_DB_HOST=127.0.0.1
 BACKUP_TRANSACTION_DB_PORT=3306
@@ -223,57 +198,39 @@ BACKUP_TRANSACTION_DB_DATABASE=mpos_transaction
 BACKUP_TRANSACTION_DB_USERNAME=root
 BACKUP_TRANSACTION_DB_PASSWORD=your_password
 
-# rclone
+# rclone — untuk upload ke Google Drive
 RCLONE_REMOTE=gdrive
 RCLONE_REMOTE_PATH=backup-app
 
-# Retention (hapus backup lebih dari N hari)
-BACKUP_RETENTION_DAYS=7
+# Notifikasi email jika backup gagal
+BACKUP_NOTIFICATION_MAIL=your@example.com
 ```
 
-### 12.3 Menjalankan backup manual
+### 12.2 Menjalankan backup manual
 
 ```bash
-php artisan app:run-backup
+php artisan backup:run
 ```
 
-Dry-run (preflight saja, tidak ada backup):
+Membersihkan backup lama:
 
 ```bash
-php artisan app:run-backup --dry-run
+php artisan backup:clean
 ```
 
-### 12.4 Jadwal otomatis (Hourly)
+Memonitor kesehatan backup:
 
-Command sudah didaftarkan di scheduler Laravel (`bootstrap/app.php`):
-
-```php
-$schedule->command('app:run-backup')->hourly();
+```bash
+php artisan backup:monitor
 ```
 
-Pastikan cron job sudah aktif di server (jalankan sekali sebagai root/user yang menjalankan PHP):
-
-```
-* * * * * cd /path-to-your-project && php artisan schedule:run >> /dev/null 2>&1
-```
-
-Untuk Windows, gunakan Task Scheduler (jalankan setiap menit seperti pada bagian 10).
-
-### 12.5 Retention Policy
-
-- **Lokal**: file di `storage/app/backup/` dengan `mtime` lebih lama dari `BACKUP_RETENTION_DAYS` hari
-  akan dihapus otomatis setelah setiap backup.
-- **Remote**: `rclone delete gdrive:backup-app --min-age 7d --rmdirs` dijalankan untuk membersihkan
-  file lama di Google Drive.
-
-### 12.6 Dependency yang dibutuhkan
+### 12.3 Dependency yang dibutuhkan
 
 | Binary | Kegunaan |
 |--------|----------|
-| `rclone` | Upload ke Google Drive & hapus file lama remote |
+| `rclone` | Upload ke Google Drive |
 | `mysqldump` | Dump MySQL/MariaDB |
 | `pg_dump` | Dump PostgreSQL (jika menggunakan pgsql) |
-| `tar` | Kompresi folder uploads |
 
-Pastikan semua binary tersedia di PATH sebelum menjalankan command.
+Pastikan semua binary tersedia di PATH sebelum menjalankan backup.
 

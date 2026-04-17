@@ -2,8 +2,8 @@
 
 namespace App\Listeners;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 use Spatie\Backup\Events\BackupWasSuccessful;
 use Symfony\Component\Process\Process;
 
@@ -16,7 +16,9 @@ class SyncBackupToRemote
     {
         $remote = (string) config('backup-custom.rclone.remote', 'gdrive');
         $remotePath = trim((string) config('backup-custom.rclone.remote_path', 'backup-app'), '/');
-        $localBackupRoot = Storage::disk('backup')->path('');
+
+        // Trailing slash ensures rclone copies the directory contents, not the directory itself.
+        $localBackupRoot = rtrim(Storage::disk('backup')->path(''), DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
 
         $process = new Process(
             ['rclone', 'copy', $localBackupRoot, "{$remote}:{$remotePath}"],
@@ -26,8 +28,9 @@ class SyncBackupToRemote
         $process->run();
 
         if (! $process->isSuccessful()) {
-            throw new RuntimeException(
-                'Gagal mengupload backup ke remote rclone: '.$process->getErrorOutput()
+            Log::channel('backup')->error(
+                'Gagal mengupload backup ke remote rclone',
+                ['error' => $process->getErrorOutput()]
             );
         }
     }
