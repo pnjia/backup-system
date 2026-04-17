@@ -182,3 +182,98 @@ Mulai dari dry-run, lalu berikan command full restore dengan rollback-on-fail.
 ---
 
 Update: saya menambahkan contoh `.env.example` ke repository; lihat file root `.env.example`.
+
+---
+
+## 12. Custom Backup Command: `app:run-backup`
+
+Command ini melakukan backup multi-database dan kompresi uploads secara manual maupun terjadwal
+setiap jam, **tanpa bergantung pada Spatie Backup**.
+
+### 12.1 Output yang dihasilkan
+
+```
+storage/app/backup/
+├── mpos_[timestamp].sql                      # dump database utama
+├── mpos_transaction_[timestamp].sql          # dump database transaksi
+└── uploads/
+    └── uploads_[timestamp].tar.gz            # kompresi folder storage/app/public/uploads
+```
+
+`[timestamp]` menggunakan format `Y-m-d_H-i-s` dan konsisten untuk satu kali jalan.
+
+### 12.2 Konfigurasi `.env`
+
+Tambahkan blok berikut ke `.env` (contoh tersedia di `.env.example`):
+
+```env
+# Database Utama
+BACKUP_MAIN_DB_CONNECTION=mysql
+BACKUP_MAIN_DB_HOST=127.0.0.1
+BACKUP_MAIN_DB_PORT=3306
+BACKUP_MAIN_DB_DATABASE=mpos
+BACKUP_MAIN_DB_USERNAME=root
+BACKUP_MAIN_DB_PASSWORD=your_password
+
+# Database Transaksi
+BACKUP_TRANSACTION_DB_CONNECTION=mysql
+BACKUP_TRANSACTION_DB_HOST=127.0.0.1
+BACKUP_TRANSACTION_DB_PORT=3306
+BACKUP_TRANSACTION_DB_DATABASE=mpos_transaction
+BACKUP_TRANSACTION_DB_USERNAME=root
+BACKUP_TRANSACTION_DB_PASSWORD=your_password
+
+# rclone
+RCLONE_REMOTE=gdrive
+RCLONE_REMOTE_PATH=backup-app
+
+# Retention (hapus backup lebih dari N hari)
+BACKUP_RETENTION_DAYS=7
+```
+
+### 12.3 Menjalankan backup manual
+
+```bash
+php artisan app:run-backup
+```
+
+Dry-run (preflight saja, tidak ada backup):
+
+```bash
+php artisan app:run-backup --dry-run
+```
+
+### 12.4 Jadwal otomatis (Hourly)
+
+Command sudah didaftarkan di scheduler Laravel (`bootstrap/app.php`):
+
+```php
+$schedule->command('app:run-backup')->hourly();
+```
+
+Pastikan cron job sudah aktif di server (jalankan sekali sebagai root/user yang menjalankan PHP):
+
+```
+* * * * * cd /path-to-your-project && php artisan schedule:run >> /dev/null 2>&1
+```
+
+Untuk Windows, gunakan Task Scheduler (jalankan setiap menit seperti pada bagian 10).
+
+### 12.5 Retention Policy
+
+- **Lokal**: file di `storage/app/backup/` dengan `mtime` lebih lama dari `BACKUP_RETENTION_DAYS` hari
+  akan dihapus otomatis setelah setiap backup.
+- **Remote**: `rclone delete gdrive:backup-app --min-age 7d --rmdirs` dijalankan untuk membersihkan
+  file lama di Google Drive.
+
+### 12.6 Dependency yang dibutuhkan
+
+| Binary | Kegunaan |
+|--------|----------|
+| `rclone` | Upload ke Google Drive & hapus file lama remote |
+| `mysqldump` | Dump MySQL/MariaDB |
+| `pg_dump` | Dump PostgreSQL (jika menggunakan pgsql) |
+| `tar` | Kompresi folder uploads |
+
+Pastikan semua binary tersedia di PATH sebelum menjalankan command.
+
