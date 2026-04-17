@@ -99,6 +99,44 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        'mysql_main' => [
+            'driver' => env('BACKUP_MAIN_DB_CONNECTION', 'mysql'),
+            'host' => env('BACKUP_MAIN_DB_HOST', '127.0.0.1'),
+            'port' => env('BACKUP_MAIN_DB_PORT', '3306'),
+            'database' => env('BACKUP_MAIN_DB_DATABASE', 'mpos'),
+            'username' => env('BACKUP_MAIN_DB_USERNAME', 'root'),
+            'password' => env('BACKUP_MAIN_DB_PASSWORD', ''),
+            'unix_socket' => '',
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'dump' => [
+                'useSingleTransaction' => true,
+            ],
+        ],
+
+        'mysql_transaction' => [
+            'driver' => env('BACKUP_TRANSACTION_DB_CONNECTION', 'mysql'),
+            'host' => env('BACKUP_TRANSACTION_DB_HOST', '127.0.0.1'),
+            'port' => env('BACKUP_TRANSACTION_DB_PORT', '3306'),
+            'database' => env('BACKUP_TRANSACTION_DB_DATABASE', 'mpos_transaction'),
+            'username' => env('BACKUP_TRANSACTION_DB_USERNAME', 'root'),
+            'password' => env('BACKUP_TRANSACTION_DB_PASSWORD', ''),
+            'unix_socket' => '',
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'dump' => [
+                'useSingleTransaction' => true,
+            ],
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),

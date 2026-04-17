@@ -26,8 +26,7 @@ return [
                  * The list of directories and files that will be included in the backup.
                  */
                 'include' => [
-                    base_path(),
-                    // storage_path(),  // Include if you use zero downtime deployments and don't follow symlinks
+                    storage_path('app/public'),
                 ],
 
                 /*
@@ -90,7 +89,8 @@ return [
              * For a complete list of available customization options, see https://github.com/spatie/db-dumper
              */
             'databases' => [
-                env('DB_CONNECTION', 'mysql'),
+                'mysql_main',
+                'mysql_transaction',
             ],
         ],
 
@@ -164,7 +164,7 @@ return [
              * The disk names on which the backups will be stored.
              */
             'disks' => [
-                'local',
+                'backup',
             ],
 
             /*
@@ -236,7 +236,7 @@ return [
         'notifiable' => Notifiable::class,
 
         'mail' => [
-            'to' => 'your@example.com',
+            'to' => env('BACKUP_NOTIFICATION_MAIL', 'your@example.com'),
 
             'from' => [
                 'address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
@@ -287,7 +287,7 @@ return [
      * Set to false to disable backup logging entirely.
      * Set to null to use the default log channel.
      */
-    'log_channel' => null,
+    'log_channel' => 'backup',
 
     /*
      * Here you can specify which backups should be monitored.
@@ -297,7 +297,7 @@ return [
     'monitor_backups' => [
         [
             'name' => env('APP_NAME', 'laravel-backup'),
-            'disks' => ['local'],
+            'disks' => ['backup'],
             'health_checks' => [
                 MaximumAgeInDays::class => 1,
                 MaximumStorageInMegabytes::class => 5000,
