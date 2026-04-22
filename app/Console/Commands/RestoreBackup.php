@@ -78,7 +78,10 @@ class RestoreBackup extends Command
                 $dbName = (string) ($dbConfig['database'] ?? '');
 
                 if ($dbName === '') {
-                    throw new RuntimeException("Konfigurasi database untuk koneksi '{$connection}' tidak valid. Nama database kosong.");
+                    throw new RuntimeException(
+                        "Koneksi '{$connection}' tidak ditemukan atau nama database kosong di config/database.php. "
+                        .'Periksa konfigurasi koneksi atau gunakan opsi --connections untuk menentukan koneksi yang valid.'
+                    );
                 }
 
                 $sqlFile = $this->findFirstByFileName($extractTarget, $dbName.'.sql');
