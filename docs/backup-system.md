@@ -134,9 +134,9 @@ Restore dengan rollback otomatis:
 php artisan restore:backup 2026-04-16-01-38-19.zip --force --rollback-on-fail --disk=gdrive --remote-path=backup-app -vv
 ```
 
-### 8.4 Catatan untuk SQLite
+### 8.4 Catatan driver database
 - Restore DB otomatis saat ini hanya mendukung `mysql` dan `pgsql`.
-- Jika environment menggunakan `sqlite`, gunakan `--restore-db=0` bila hanya ingin restore file storage.
+- Untuk environment yang menggunakan driver selain itu, gunakan `--restore-db=0` bila hanya ingin restore file storage.
 - Contoh:
 
 ```bash
@@ -169,8 +169,8 @@ Proyek ini menggunakan `spatie/laravel-backup` sebagai mekanisme backup utama. A
 ```
 cron (setiap menit) → schedule:run
   → 02:00 backup:run
-      ├── dump mysql_main  (mpos)          → storage/app/backups/{APP_NAME}/
-      ├── dump mysql_transaction           → storage/app/backups/{APP_NAME}/
+      ├── dump mysql_main  (perpustakaan)       → storage/app/backups/{APP_NAME}/
+      ├── dump mysql_transaction (perpustakaan_transaksi) → storage/app/backups/{APP_NAME}/
       ├── compress storage/app/public/     → (masuk ke dalam zip)
       └── zip semua → storage/app/backups/{APP_NAME}/{timestamp}.zip
           └── event BackupWasSuccessful
@@ -187,14 +187,14 @@ cron (setiap menit) → schedule:run
 BACKUP_MAIN_DB_CONNECTION=mysql
 BACKUP_MAIN_DB_HOST=127.0.0.1
 BACKUP_MAIN_DB_PORT=3306
-BACKUP_MAIN_DB_DATABASE=mpos
+BACKUP_MAIN_DB_DATABASE=perpustakaan
 BACKUP_MAIN_DB_USERNAME=root
 BACKUP_MAIN_DB_PASSWORD=your_password
 
 BACKUP_TRANSACTION_DB_CONNECTION=mysql
 BACKUP_TRANSACTION_DB_HOST=127.0.0.1
 BACKUP_TRANSACTION_DB_PORT=3306
-BACKUP_TRANSACTION_DB_DATABASE=mpos_transaction
+BACKUP_TRANSACTION_DB_DATABASE=perpustakaan_transaksi
 BACKUP_TRANSACTION_DB_USERNAME=root
 BACKUP_TRANSACTION_DB_PASSWORD=your_password
 

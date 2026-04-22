@@ -17,7 +17,7 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    'default' => env('DB_CONNECTION', 'mysql'),
 
     /*
     |--------------------------------------------------------------------------
@@ -31,18 +31,6 @@ return [
     */
 
     'connections' => [
-
-        'sqlite' => [
-            'driver' => 'sqlite',
-            'url' => env('DB_URL'),
-            'database' => env('DB_DATABASE', database_path('database.sqlite')),
-            'prefix' => '',
-            'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
-        ],
 
         'mysql' => [
             'driver' => 'mysql',
@@ -103,7 +91,7 @@ return [
             'driver' => env('BACKUP_MAIN_DB_CONNECTION', 'mysql'),
             'host' => env('BACKUP_MAIN_DB_HOST', '127.0.0.1'),
             'port' => env('BACKUP_MAIN_DB_PORT', '3306'),
-            'database' => env('BACKUP_MAIN_DB_DATABASE', 'mpos'),
+            'database' => env('BACKUP_MAIN_DB_DATABASE', 'perpustakaan'),
             'username' => env('BACKUP_MAIN_DB_USERNAME', 'root'),
             'password' => env('BACKUP_MAIN_DB_PASSWORD', ''),
             'unix_socket' => '',
@@ -122,7 +110,7 @@ return [
             'driver' => env('BACKUP_TRANSACTION_DB_CONNECTION', 'mysql'),
             'host' => env('BACKUP_TRANSACTION_DB_HOST', '127.0.0.1'),
             'port' => env('BACKUP_TRANSACTION_DB_PORT', '3306'),
-            'database' => env('BACKUP_TRANSACTION_DB_DATABASE', 'mpos_transaction'),
+            'database' => env('BACKUP_TRANSACTION_DB_DATABASE', 'perpustakaan_transaksi'),
             'username' => env('BACKUP_TRANSACTION_DB_USERNAME', 'root'),
             'password' => env('BACKUP_TRANSACTION_DB_PASSWORD', ''),
             'unix_socket' => '',
