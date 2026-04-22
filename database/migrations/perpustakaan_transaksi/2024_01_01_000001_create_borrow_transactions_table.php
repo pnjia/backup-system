@@ -12,6 +12,9 @@ return new class extends Migration
     {
         Schema::connection($this->connection)->create('borrow_transactions', function (Blueprint $table) {
             $table->id();
+            // member_id references members.id in the perpustakaan (mysql_main) database.
+            // Cross-database foreign keys are not supported in MySQL, so referential
+            // integrity must be enforced at the application level.
             $table->unsignedBigInteger('member_id')->index();
             $table->timestamp('borrowed_at')->useCurrent();
             $table->date('due_date');

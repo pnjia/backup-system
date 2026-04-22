@@ -13,6 +13,9 @@ return new class extends Migration
         Schema::connection($this->connection)->create('borrow_items', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('borrow_transaction_id')->index();
+            // book_id references books.id in the perpustakaan (mysql_main) database.
+            // Cross-database foreign keys are not supported in MySQL, so referential
+            // integrity must be enforced at the application level.
             $table->unsignedBigInteger('book_id')->index();
             $table->unsignedInteger('quantity')->default(1);
             $table->timestamps();
