@@ -19,7 +19,7 @@ class RestoreBackup extends Command
         {--remote-path=backup-app : Folder backup di remote}
         {--local-dir= : Folder lokal untuk menyimpan file zip hasil download}
         {--extract-dir= : Folder lokal untuk ekstraksi backup}
-        {--db-file=database.sql : Nama file dump DB di dalam zip}
+        {--connections= : Koneksi DB yang akan direstore, pisahkan dengan koma (default: semua dari config backup.source.databases)}
         {--restore-db=1 : 1 untuk restore DB, 0 untuk skip}
         {--restore-files=1 : 1 untuk restore file storage, 0 untuk skip}
         {--rollback-on-fail : Rollback otomatis jika restore gagal}
@@ -40,8 +40,10 @@ class RestoreBackup extends Command
         $dryRun = (bool) $this->option('dry-run');
         $force = (bool) $this->option('force');
 
+        $connections = $restoreDb ? $this->resolveConnections() : [];
+
         $this->info('0/5 Preflight checks');
-        $this->runPreflightChecks($restoreDb, $rollbackOnFail);
+        $this->runPreflightChecks($connections, $rollbackOnFail);
 
         $localDir = $this->normalizePathOption((string) $this->option('local-dir'), storage_path('app/restore/downloads'));
         $extractDir = $this->normalizePathOption((string) $this->option('extract-dir'), storage_path('app/restore/extracted'));
@@ -66,14 +68,31 @@ class RestoreBackup extends Command
         $this->extractZip($localZipPath, $extractTarget);
 
         $this->info('3/5 Validasi isi backup');
-        $dbDumpPath = $this->findFirstByFileName($extractTarget, (string) $this->option('db-file'));
 
-        if ($restoreDb && $dbDumpPath === null) {
-            throw new RuntimeException('File dump database tidak ditemukan. Set --db-file sesuai nama file dump di backup.');
-        }
+        // Build restore plan: for each connection, locate its SQL dump by database name.
+        $dbRestorePlan = [];
 
-        if ($dbDumpPath !== null) {
-            $this->line('DB dump ditemukan: '.$dbDumpPath);
+        if ($restoreDb) {
+            foreach ($connections as $connection) {
+                $dbConfig = (array) config('database.connections.'.$connection, []);
+                $dbName = (string) ($dbConfig['database'] ?? '');
+
+                if ($dbName === '') {
+                    throw new RuntimeException("Konfigurasi database untuk koneksi '{$connection}' tidak valid. Nama database kosong.");
+                }
+
+                $sqlFile = $this->findFirstByFileName($extractTarget, $dbName.'.sql');
+
+                if ($sqlFile === null) {
+                    throw new RuntimeException(
+                        "File dump untuk koneksi '{$connection}' (database: {$dbName}) tidak ditemukan di backup. "
+                        ."Pastikan nama file di dalam zip adalah '{$dbName}.sql'."
+                    );
+                }
+
+                $this->line("DB dump ditemukan [{$connection}]: {$sqlFile}");
+                $dbRestorePlan[] = ['connection' => $connection, 'dbName' => $dbName, 'path' => $sqlFile];
+            }
         }
 
         $storageDirInBackup = $this->findFirstDirectoryNamed($extractTarget, 'storage');
@@ -97,7 +116,8 @@ class RestoreBackup extends Command
             return self::INVALID;
         }
 
-        $snapshotDbPath = null;
+        // Snapshots: one SQL file per connection, one directory for storage.
+        $snapshotDbPlans = [];
         $snapshotStoragePath = null;
 
         if ($rollbackOnFail) {
@@ -106,9 +126,12 @@ class RestoreBackup extends Command
             File::ensureDirectoryExists($snapshotDir);
 
             if ($restoreDb) {
-                $snapshotDbPath = $snapshotDir.DIRECTORY_SEPARATOR.'database-before-restore.sql';
-                $this->snapshotDatabase($snapshotDbPath);
-                $this->line('Snapshot DB: '.$snapshotDbPath);
+                foreach ($dbRestorePlan as $plan) {
+                    $snapPath = $snapshotDir.DIRECTORY_SEPARATOR.'database-'.$plan['connection'].'-before-restore.sql';
+                    $this->snapshotDatabase($plan['connection'], $snapPath);
+                    $this->line('Snapshot DB ['.$plan['connection'].']: '.$snapPath);
+                    $snapshotDbPlans[] = ['connection' => $plan['connection'], 'path' => $snapPath];
+                }
             }
 
             if ($restoreFiles) {
@@ -124,10 +147,12 @@ class RestoreBackup extends Command
 
         try {
             try {
-                if ($restoreDb && $dbDumpPath !== null) {
-                    $this->info('Restore database dimulai');
-                    $this->restoreDatabase($dbDumpPath);
-                    $this->info('Restore database selesai');
+                if ($restoreDb) {
+                    foreach ($dbRestorePlan as $plan) {
+                        $this->info("Restore database [{$plan['connection']}] dimulai");
+                        $this->restoreDatabase($plan['connection'], $plan['path']);
+                        $this->info("Restore database [{$plan['connection']}] selesai");
+                    }
                 }
 
                 if ($restoreFiles && $storageDirInBackup !== null) {
@@ -142,7 +167,7 @@ class RestoreBackup extends Command
                     $this->warn('Rollback otomatis dimulai...');
 
                     try {
-                        $this->rollbackFromSnapshot($snapshotDbPath, $snapshotStoragePath, $restoreDb, $restoreFiles);
+                        $this->rollbackFromSnapshot($snapshotDbPlans, $snapshotStoragePath, $restoreDb, $restoreFiles);
                         $this->info('Rollback otomatis selesai.');
                     } catch (Throwable $rollbackError) {
                         throw new RuntimeException(
@@ -163,6 +188,32 @@ class RestoreBackup extends Command
 
         $this->info('Restore backup selesai.');
         return self::SUCCESS;
+    }
+
+    /**
+     * Resolve the list of DB connections to restore.
+     * Uses --connections option if provided, otherwise reads from backup config.
+     *
+     * @return string[]
+     */
+    private function resolveConnections(): array
+    {
+        $option = trim((string) $this->option('connections'));
+
+        if ($option !== '') {
+            return array_values(array_filter(array_map('trim', explode(',', $option))));
+        }
+
+        $connections = (array) config('backup.backup.source.databases', []);
+
+        if (empty($connections)) {
+            throw new RuntimeException(
+                'Tidak ada koneksi database yang dikonfigurasi. '
+                .'Tambahkan koneksi di config/backup.php atau gunakan opsi --connections.'
+            );
+        }
+
+        return array_values(array_filter($connections));
     }
 
     private function normalizePathOption(string $value, string $fallback): string
@@ -200,47 +251,47 @@ class RestoreBackup extends Command
         $zip->close();
     }
 
-    private function restoreDatabase(string $dbDumpPath): void
+    private function restoreDatabase(string $connection, string $dbDumpPath): void
     {
-        $connection = (string) config('database.default');
         $db = (array) config('database.connections.'.$connection, []);
+        $driver = (string) ($db['driver'] ?? '');
 
-        if ($connection === 'mysql') {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
             $this->restoreMysql($db, $dbDumpPath);
             return;
         }
 
-        if ($connection === 'pgsql') {
+        if ($driver === 'pgsql') {
             $this->restorePgsql($db, $dbDumpPath);
             return;
         }
 
         throw new RuntimeException(
-            'Restore DB otomatis hanya mendukung mysql/pgsql. Koneksi aktif: '.$connection
-            .'. Jika hanya ingin restore file storage, gunakan --restore-db=0.'
+            "Restore DB otomatis hanya mendukung mysql/pgsql. Driver koneksi '{$connection}': {$driver}."
+            .' Jika hanya ingin restore file storage, gunakan --restore-db=0.'
         );
     }
 
-    private function snapshotDatabase(string $snapshotDbPath): void
+    private function snapshotDatabase(string $connection, string $snapshotDbPath): void
     {
         File::ensureDirectoryExists(dirname($snapshotDbPath));
 
-        $connection = (string) config('database.default');
         $db = (array) config('database.connections.'.$connection, []);
+        $driver = (string) ($db['driver'] ?? '');
 
-        if ($connection === 'mysql') {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
             $this->dumpMysql($db, $snapshotDbPath);
             return;
         }
 
-        if ($connection === 'pgsql') {
+        if ($driver === 'pgsql') {
             $this->dumpPgsql($db, $snapshotDbPath);
             return;
         }
 
         throw new RuntimeException(
-            'Snapshot DB hanya mendukung mysql/pgsql. Koneksi aktif: '.$connection
-            .'. Jika hanya ingin restore file storage, gunakan --restore-db=0.'
+            "Snapshot DB hanya mendukung mysql/pgsql. Driver koneksi '{$connection}': {$driver}."
+            .' Jika hanya ingin restore file storage, gunakan --restore-db=0.'
         );
     }
 
@@ -392,18 +443,23 @@ class RestoreBackup extends Command
         }
     }
 
+    /**
+     * @param  array<int, array{connection: string, path: string}>  $snapshotDbPlans
+     */
     private function rollbackFromSnapshot(
-        ?string $snapshotDbPath,
+        array $snapshotDbPlans,
         ?string $snapshotStoragePath,
         bool $restoreDb,
         bool $restoreFiles
     ): void {
-        if ($restoreDb && $snapshotDbPath !== null) {
-            if (! File::exists($snapshotDbPath)) {
-                throw new RuntimeException('Snapshot DB tidak ditemukan: '.$snapshotDbPath);
-            }
+        if ($restoreDb) {
+            foreach ($snapshotDbPlans as $snap) {
+                if (! File::exists($snap['path'])) {
+                    throw new RuntimeException('Snapshot DB tidak ditemukan: '.$snap['path']);
+                }
 
-            $this->restoreDatabase($snapshotDbPath);
+                $this->restoreDatabase($snap['connection'], $snap['path']);
+            }
         }
 
         if ($restoreFiles && $snapshotStoragePath !== null) {
@@ -496,7 +552,10 @@ class RestoreBackup extends Command
         }
     }
 
-    private function runPreflightChecks(bool $restoreDb, bool $rollbackOnFail): void
+    /**
+     * @param  string[]  $connections
+     */
+    private function runPreflightChecks(array $connections, bool $rollbackOnFail): void
     {
         if (! class_exists(ZipArchive::class)) {
             throw new RuntimeException('Ekstensi PHP zip tidak tersedia. Install ekstensi zip terlebih dahulu.');
@@ -504,36 +563,35 @@ class RestoreBackup extends Command
 
         $this->ensureBinaryAvailable('rclone');
 
-        if (! $restoreDb) {
-            return;
-        }
+        foreach ($connections as $connection) {
+            $db = (array) config('database.connections.'.$connection, []);
+            $driver = (string) ($db['driver'] ?? '');
 
-        $connection = (string) config('database.default');
+            if ($driver === 'mysql' || $driver === 'mariadb') {
+                $this->ensureBinaryAvailable('mysql');
 
-        if ($connection === 'mysql') {
-            $this->ensureBinaryAvailable('mysql');
+                if ($rollbackOnFail) {
+                    $this->ensureBinaryAvailable('mysqldump');
+                }
 
-            if ($rollbackOnFail) {
-                $this->ensureBinaryAvailable('mysqldump');
+                continue;
             }
 
-            return;
-        }
+            if ($driver === 'pgsql') {
+                $this->ensureBinaryAvailable('psql');
 
-        if ($connection === 'pgsql') {
-            $this->ensureBinaryAvailable('psql');
+                if ($rollbackOnFail) {
+                    $this->ensureBinaryAvailable('pg_dump');
+                }
 
-            if ($rollbackOnFail) {
-                $this->ensureBinaryAvailable('pg_dump');
+                continue;
             }
 
-            return;
+            throw new RuntimeException(
+                "Preflight DB hanya mendukung mysql/pgsql. Driver koneksi '{$connection}': {$driver}."
+                .' Jika hanya ingin restore file storage, gunakan --restore-db=0.'
+            );
         }
-
-        throw new RuntimeException(
-            'Preflight DB hanya mendukung mysql/pgsql. Koneksi aktif: '.$connection
-            .'. Jika hanya ingin restore file storage, gunakan --restore-db=0.'
-        );
     }
 
     private function ensureBinaryAvailable(string $binary): void
